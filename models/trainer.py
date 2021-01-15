@@ -128,7 +128,7 @@ class Trainer:
 
         # Logging
         sub_name = f'oof_score_{self.oof_score:.4f}.csv'
-        oof[[self.tar_col]].to_csv(os.path.join(sub_name), index=False)
+        oof[[self.id_col, self.tar_col]].to_csv(os.path.join(sub_name), index=False)
         self.experiment.log_asset(file_data=sub_name, file_name=sub_name)
         os.remove(sub_name)
 
@@ -162,7 +162,7 @@ class Trainer:
 
         # Logging
         sub_name = f'sub_score_{self.oof_score:.4f}.csv'
-        sub[[self.tar_col]].to_csv(os.path.join(sub_name), index=False)
+        sub[[self.id_col, self.tar_col]].to_csv(os.path.join(sub_name), index=False)
         self.experiment.log_asset(file_data=sub_name, file_name=sub_name)
         os.remove(sub_name)
 

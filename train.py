@@ -11,6 +11,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import mean_squared_log_error, mean_absolute_error
 
 from utils.utils import unpickle, to_pickle, seed_everything
+from utils.preprocess import convert_wareki_to_seireki, normalize_area, normalize_moyori
 from utils.data import load_data
 from features import CategoryEncoder, FrequencyEncoder, GroupbyTransformer, TextVectorizer, PivotCountEncoder
 
@@ -31,14 +32,31 @@ def MAE(y_true, y_pred):
 
 def preprocessing(df, cfg):
 
-    # TODO データが存在しないカラムを削除
-    del_cols = ['地域', '土地の形状', '間口', '延床面積（㎡）', '前面道路：方位', '前面道路：種類', '前面道路：幅員（ｍ）', '取引の事情等']
+    # TODO 不要なカラムを削除
+    del_cols = ['種類', '地域', '市区町村コード', '土地の形状', '間口', '延床面積（㎡）',
+                '前面道路：方位', '前面道路：種類', '前面道路：幅員（ｍ）', '取引の事情等']
     df = df.drop(del_cols, axis=1)
 
-    # TODO 面積を数値データ化
-    rep_dict = {'2000㎡以上': 2000, '5000㎡以上': 5000}
-    df['面積（㎡）'] = df['面積（㎡）'].replace(rep_dict)
-    df['面積（㎡）'] = df['面積（㎡）'].astype(int)
+    # TODO 面積
+    df = normalize_area(df)
+
+    # TODO 最寄駅：距離（分）
+    df = normalize_moyori(df)
+
+    # TODO 和暦→西暦
+    df['建築年'] = df['建築年'].apply(lambda x: convert_wareki_to_seireki(x))
+
+    # TODO 取引時点→`year`, `quarter`
+    df['year'] = df['取引時点'].apply(lambda x: x[:4]).astype(int)
+    df['quarter'] = df['取引時点'].apply(lambda x: x[6:7]).astype(int)
+    del df['取引時点']
+
+    # TODO 用途, 建物の構造をOnehot
+    for col in ['用途', '建物の構造']:
+        tmp = df[col].str.get_dummies(sep='、')
+        tmp.columns = [f'{col}_{c}' for c in tmp.columns]
+        df = pd.concat([df, tmp], axis=1)
+        del tmp, df[col]
 
 
     # ---------- 下記はfeature_enginneringを一通りやったあとの処理 -------------------------------------------
@@ -66,7 +84,8 @@ def main(cfg: DictConfig):
     seed_everything(cfg.data.seed)
 
     experiment = Experiment(api_key=cfg.exp.api_key,
-                            project_name=cfg.exp.project_name)
+                            project_name=cfg.exp.project_name,
+                            auto_output_logging='simple')
 
     experiment.log_parameters(dict(cfg.data))
 
@@ -95,6 +114,9 @@ def main(cfg: DictConfig):
             experiment.log_asset(file_data='./input/data.pkl', file_name='data.pkl')
         except:
             pass
+
+
+    df.head(200).to_csv('ttt.csv', index=False)
 
     features = [c for c in df.columns if c not in del_tar_col]
 
