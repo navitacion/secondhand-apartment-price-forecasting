@@ -34,7 +34,7 @@ class LGBMModel(BaseModel):
                           train_data,
                           valid_sets=[valid_data, train_data],
                           valid_names=['eval', 'train'],
-                          verbose_eval=1000,
+                          verbose_eval=5000,
                           )
 
         oof = self.model.predict(X_val, num_iteration=self.model.best_iteration)

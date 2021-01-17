@@ -12,3 +12,4 @@ opencv-python==4.4.0.46
 category_encoders==2.2.2
 catboost==0.24.3
 umap-learn==0.4.6
+mojimoji==0.0.11

@@ -6,6 +6,7 @@ authors = ["navitacion <masataka.i.navi@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.6"
+mojimoji = "^0.0.11"
 
 [tool.poetry.dev-dependencies]
 

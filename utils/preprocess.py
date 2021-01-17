@@ -1,6 +1,7 @@
 import re
 import math
 import numpy as np
+import mojimoji
 
 def normalize_moyori(df):
     rep_dict = {
@@ -40,3 +41,12 @@ def convert_wareki_to_seireki(wareki):
     elif '令和' in wareki:
         seireki = 2018+value
     return seireki
+
+
+def convert_madori(x):
+    if x is np.nan:
+        return x
+    else:
+        return mojimoji.zen_to_han(x, kana=False)
+
+

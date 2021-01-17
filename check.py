@@ -1,11 +1,13 @@
 
 import pandas as pd
-
+import numpy as np
 from utils import load_data
 from utils import unpickle
 
-from utils.preprocess import normalize_area, normalize_moyori, convert_wareki_to_seireki
-from features import CategoryEncoder, FrequencyEncoder, GroupbyTransformer, LagTransformer, TextVectorizer
+import mojimoji
+
+from utils.preprocess import normalize_area, normalize_moyori, convert_wareki_to_seireki, convert_madori
+# from features import CategoryEncoder, FrequencyEncoder, GroupbyTransformer, LagTransformer, TextVectorizer
 
 pd.set_option('display.max_rows', None)
 data_dir = './input'
@@ -13,30 +15,27 @@ id_col = 'ID'
 tar_col = '取引価格（総額）_log'
 df = load_data(data_dir, down_sample=1.0, seed=42, id_col=id_col, target_col=tar_col)
 
-del_cols = ['種類', '地域', '市区町村コード', '土地の形状', '間口', '延床面積（㎡）',
-            '前面道路：方位', '前面道路：種類', '前面道路：幅員（ｍ）', '取引の事情等']
-df = df.drop(del_cols, axis=1)
 
-# TODO 面積
-df = normalize_area(df)
+# TODO 欠損処理
+for c in ['最寄駅：名称', '用途', '今後の利用目的', '建物の構造', '間取り', '都市計画', '改装']:
+    df[c].fillna('不明', inplace=True)
 
-# TODO 最寄駅：距離（分）
-df = normalize_moyori(df)
 
-# TODO 和暦→西暦
-df['建築年'] = df['建築年'].apply(lambda x: convert_wareki_to_seireki(x))
+# TODO 間取り
+df['間取り'] = df['間取り'].apply(convert_madori)
+for s in ['L', 'D', 'K', 'S']:
+    df[f'間取り_{s}'] = df['間取り'].apply(lambda x: x.count(s))
 
-# TODO 取引時点→`year`, `quarter`
-df['year'] = df['取引時点'].apply(lambda x: x[:4]).astype(int)
-df['quarter'] = df['取引時点'].apply(lambda x: x[6:7]).astype(int)
-del df['取引時点']
+# 間取りの最初の数字をとってくる
+df['間取り_suffix'] = df['間取り'].apply(lambda x: x[:1])
+df['間取り_suffix'] = df['間取り_suffix'].apply(lambda x: x if x.isdigit() else 1)
+df['間取り_suffix'] = df['間取り_suffix'].astype(int)
 
-# TODO 用途をOnehot
-tmp = df['用途'].str.get_dummies(sep='、')
-tmp.columns = [f'用途_{c}' for c in tmp.columns]
-df = pd.concat([df, tmp], axis=1)
-del tmp, df['用途']
+tar_cols = [c for c in df.columns if c.startswith('間取り_')]
+df['fe_count_間取り'] = df[tar_cols].sum(axis=1)
 
-print(df.dtypes)
+for c in ['オープンフロア', 'スタジオ', 'メゾネット']:
+    df[f'fe_is_間取り_{c}'] = df['間取り'].apply(lambda x: 1 if x == c else 0)
 
-print(df['建物の構造'].value_counts())
+
+df = df.head(100)
