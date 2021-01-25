@@ -4,10 +4,11 @@ from comet_ml import Experiment
 import hydra
 from omegaconf import DictConfig
 import mojimoji
+import itertools
 
 import pandas as pd
 
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, GroupKFold
 from sklearn.cluster import KMeans
 from sklearn.metrics import mean_squared_log_error, mean_absolute_error
 
@@ -45,6 +46,8 @@ def preprocessing(df, cfg):
     # TODO 地区名、最寄り
     for c in ['地区名', '最寄駅：名称']:
         df[c] = df[c].apply(lambda x: mojimoji.zen_to_han(x, kana=False))
+    # ()を削除
+    df['最寄駅：名称_1'] = df['最寄駅：名称'].apply(lambda x: x.split('(')[0])
 
     # TODO 面積
     df = normalize_area(df)
@@ -73,21 +76,61 @@ def preprocessing(df, cfg):
         df[f'fe_count_間取り_{s}'] = df['間取り'].apply(lambda x: x.count(s))
 
     # 間取りの最初の数字をとってくる
-    df['fe_count_間取り_suffix'] = df['間取り'].apply(lambda x: x[:1])
-    df['fe_count_間取り_suffix'] = df['fe_count_間取り_suffix'].apply(lambda x: x if x.isdigit() else 1)
-    df['fe_count_間取り_suffix'] = df['fe_count_間取り_suffix'].astype(int)
+    df['fe_count_間取り_prefix'] = df['間取り'].apply(lambda x: x[:1])
+    df['fe_count_間取り_prefix'] = df['fe_count_間取り_prefix'].apply(lambda x: x if x.isdigit() else 1)
+    df['fe_count_間取り_prefix'] = df['fe_count_間取り_prefix'].astype(int)
 
-    tar_cols = [c for c in df.columns if c.startswith('fe_count_間取り_')]
-    df['fe_count_間取り_all'] = df[tar_cols].sum(axis=1)
-
+    # 間取りから部屋の数を計算　+Sがあるものは別途算出
+    df['fe_count_room'] = df['fe_count_間取り_prefix'] + 1
+    df['flag'] = df['間取り'].apply(lambda x: 1 if '+' in x else 0)
+    df['fe_count_room'] = df['fe_count_room'] + df['flag']
+    del df['flag']
+    # 特殊な表記
     for c in ['オープンフロア', 'スタジオ', 'メゾネット']:
         df[f'fe_is_間取り_{c}'] = df['間取り'].apply(lambda x: 1 if x == c else 0)
 
     del df['間取り']
 
+    # TODO 1部屋あたりの面積
+    df['fe_area_per_room'] = df['面積（㎡）'] / df['fe_count_room']
+
+    # TODO 建ぺい率と容積率と面積
+    cols = ['建ぺい率（％）', '容積率（％）', '面積（㎡）']
+    for c1, c2 in itertools.combinations(cols, 2):
+        df[f'fe_mul_{c1}_{c2}'] = df[c1] * df[c2]
+        df[f'fe_div_{c1}_{c2}'] = df[c1] / df[c2]
+        df[f'fe_div_{c2}_{c1}'] = df[c2] / df[c1]
+
+
     # 地域
-    df['fe_concat_都道府県_市区町村'] = df['都道府県名'] + df['市区町村名']
     df['fe_concat_都道府県_市区町村_地区'] = df['都道府県名'] + df['市区町村名'] + df['地区名']
+    df['fe_concat_都道府県_市区町村_地区_最寄'] = df['都道府県名'] + df['市区町村名'] + df['地区名'] + df['最寄駅：名称'].apply(lambda x: x.split('(')[0])
+
+    # TODO ソフト名をテキストマイニング
+    print('text')
+    text_vectorizer = TextVectorizer(target_col='fe_concat_都道府県_市区町村_地区',
+                                     vectorizer='tfidf',
+                                     transformer='svd',
+                                     ngram_range=(1, 1),
+                                     n_components=cfg.data.vec_n_components)
+    df = text_vectorizer.transform(df)
+
+    text_vectorizer = TextVectorizer(target_col='fe_concat_都道府県_市区町村_地区_最寄',
+                                     vectorizer='tfidf',
+                                     transformer='svd',
+                                     ngram_range=(1, 1),
+                                     n_components=cfg.data.vec_n_components)
+    df = text_vectorizer.transform(df)
+
+    # TODO Groupbyでいろいろ集約
+    print('groupby')
+    group_cols = ['都道府県名', '市区町村名', '地区名', '最寄駅：名称', '建築年', 'year', 'quarter',
+                  'fe_concat_都道府県_市区町村_地区', 'fe_concat_都道府県_市区町村_地区_最寄']
+    value_cols = ['建ぺい率（％）', '容積率（％）', '面積（㎡）', '最寄駅：距離（分）', 'fe_count_room']
+    aggs = ['mean', 'sum', 'std', 'max', 'min', 'nunique']
+
+    transformer = GroupbyTransformer(group_cols, value_cols, aggs, conbination=1, use_cudf=True)
+    df = transformer.transform(df)
 
 
     # ---------- 下記はfeature_enginneringを一通りやったあとの処理 -------------------------------------------
@@ -126,6 +169,7 @@ def main(cfg: DictConfig):
     tar_col = '取引価格（総額）_log'
     criterion = MAE
     cv = KFold(n_splits=cfg.data.n_splits, shuffle=True, random_state=cfg.data.seed)
+    # cv = GroupKFold(n_splits=5)
 
 
     # Load Data  ####################################################################################

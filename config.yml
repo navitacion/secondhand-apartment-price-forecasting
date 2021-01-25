@@ -13,18 +13,18 @@ data:
   seed: 42
   n_splits: 5
   vec_max_features: 60000
-  vec_n_components: 200
+  vec_n_components: 50
 
 lgb:
   num_iterations: 100000
   objective: regression
   metric: mae
   boosting: gbdt
-  early_stopping_round: 500
-  learning_rate: 0.005
+  early_stopping_round: 1000
+  learning_rate: 0.01
   first_metric_only: True
-  feature_fraction: 0.8
-  bagging_fraction: 0.7
+  feature_fraction: 1.0
+  bagging_fraction: 1.0
   bagging_freq: 1
 
 cat:

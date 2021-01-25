@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import pickle
-# import cudf
+import cudf
 from sklearn.base import BaseEstimator, TransformerMixin
 
 

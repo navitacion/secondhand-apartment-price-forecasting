@@ -45,6 +45,7 @@ class Trainer:
             self.y_train = train[self.tar_col].values
             self.y_train = self._transform_value(self.y_train, mode='forward')
             self.train_id = train[self.id_col].values
+            self.group = train['year'].values
 
         if mode == 'predict':
             # Test
@@ -90,7 +91,7 @@ class Trainer:
         self.oof_pred = np.zeros(len(self.y_train))
         self.oof_y = np.zeros(len(self.y_train))
 
-        for i, (trn_idx, val_idx) in enumerate(self.cv.split(self.X_train)):
+        for i, (trn_idx, val_idx) in enumerate(self.cv.split(self.X_train, self.y_train, self.group)):
             X_trn, y_trn = self.X_train[trn_idx], self.y_train[trn_idx]
             X_val, y_val = self.X_train[val_idx], self.y_train[val_idx]
 
