@@ -8,8 +8,9 @@ from .base import BaseFeatureTransformer
 class GroupbyTransformer(BaseFeatureTransformer):
     def __init__(self, group_cols, value_cols, aggs, conbination=1, use_cudf=False):
         super(GroupbyTransformer, self).__init__(use_cudf)
-        self.group_cols = group_cols
-        self.value_cols = value_cols
+        # 重複を除外する
+        self.group_cols = list(set(group_cols))
+        self.value_cols = list(set(value_cols))
         self.aggs = aggs
         self.conbination = conbination
 

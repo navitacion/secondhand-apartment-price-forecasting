@@ -26,7 +26,7 @@ class LGBMModel(BaseModel):
     def __init__(self, params):
         super(LGBMModel, self).__init__(params)
 
-    def train(self, X_train, y_train, X_val, y_val):
+    def train(self, X_train, y_train, X_val, y_val, feature_name='auto'):
         train_data = lgb.Dataset(X_train, label=y_train)
         valid_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
 
@@ -34,6 +34,7 @@ class LGBMModel(BaseModel):
                           train_data,
                           valid_sets=[valid_data, train_data],
                           valid_names=['eval', 'train'],
+                          feature_name=feature_name,
                           verbose_eval=5000,
                           )
 

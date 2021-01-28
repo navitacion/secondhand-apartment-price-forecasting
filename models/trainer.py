@@ -33,11 +33,12 @@ class Trainer:
         # Split Train, Test Dataset
         train = df[df['is_train'] == 1].reset_index(drop=True)
         test = df[df['is_train'] == 0].reset_index(drop=True)
+        drop_cols = ['is_train', '取引時点', self.id_col, self.tar_col]
 
         if self.features is None:
-            self.features = [c for c in df.columns if c not in ['is_train', self.id_col, self.tar_col]]
+            self.features = [c for c in df.columns if c not in drop_cols]
         else:
-            self.features = [c for c in self.features if c not in ['is_train', self.id_col, self.tar_col]]
+            self.features = [c for c in self.features if c not in drop_cols]
 
         if mode == 'fit':
             # Train
@@ -45,7 +46,7 @@ class Trainer:
             self.y_train = train[self.tar_col].values
             self.y_train = self._transform_value(self.y_train, mode='forward')
             self.train_id = train[self.id_col].values
-            self.group = train['year'].values
+            self.group = train['取引時点']
 
         if mode == 'predict':
             # Test
@@ -91,11 +92,20 @@ class Trainer:
         self.oof_pred = np.zeros(len(self.y_train))
         self.oof_y = np.zeros(len(self.y_train))
 
-        for i, (trn_idx, val_idx) in enumerate(self.cv.split(self.X_train, self.y_train, self.group)):
+        # GroupKFold
+        # ref: https://www.guruguru.science/competitions/13/discussions/cc7167cb-3627-448a-b9eb-7afcd29fd122/
+        unique_year = self.group.unique()
+        for i, (tr_group_idx, va_group_idx) in enumerate(self.cv.split(unique_year)):
+            tr_groups, va_groups = unique_year[tr_group_idx], unique_year[va_group_idx]
+
+            trn_idx = self.group.isin(tr_groups)
+            val_idx = self.group.isin(va_groups)
+
+        # for i, (trn_idx, val_idx) in enumerate(self.cv.split(self.X_train, self.y_train, self.group)):
             X_trn, y_trn = self.X_train[trn_idx], self.y_train[trn_idx]
             X_val, y_val = self.X_train[val_idx], self.y_train[val_idx]
 
-            oof = self.model.train(X_trn, y_trn, X_val, y_val)
+            oof = self.model.train(X_trn, y_trn, X_val, y_val, feature_name=self.features)
 
             # Score
             oof = self._transform_value(oof, mode='backward')
@@ -181,17 +191,21 @@ class Trainer:
 
     def get_feature_importance(self):
         assert len(self.models) != 0, "You Must Train Model!!"
-        feat_imp = np.zeros(len(self.features))
+        feat_imp_df = pd.DataFrame(self.features, columns=['feature'])
+        tar_col =[]
 
-        for m in self.models:
-            feat_imp += m.get_feature_importance()
+        for i, m in enumerate(self.models):
+            # modelからfeature_name, importanceを取得しデータフレームにまとめる
+            tmp_feat = pd.DataFrame({'feature': m.model.feature_name(), f'importance_{i}': m.get_feature_importance()})
+            feat_imp_df = feat_imp_df.merge(tmp_feat, on='feature', how='left')
+            # 最後に集計するために各モデルごとのimportance名を記録
+            tar_col.append(f'importance_{i}')
+        feat_imp_df.fillna(0, inplace=True)
 
-        feat_imp = feat_imp / len(self.models)
+        feat_imp_df['importance'] = feat_imp_df[tar_col].sum(axis=1)
+        feat_imp_df['importance'] /= len(self.models)
+        feat_imp_df = feat_imp_df[['feature', 'importance']]
 
-        feat_imp_df = pd.DataFrame({
-            'feature': self.features,
-            'importance': feat_imp
-        })
         feat_imp_df.sort_values(by='importance', ascending=False, inplace=True)
         feat_imp_df.reset_index(drop=True, inplace=True)
         feat_imp_df.to_csv('feature_importance.csv', index=False)
