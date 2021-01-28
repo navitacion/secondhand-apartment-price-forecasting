@@ -50,3 +50,26 @@ def convert_madori(x):
         return mojimoji.zen_to_han(x, kana=False)
 
 
+
+def preprocess_madori(df):
+    df['間取り'] = df['間取り'].apply(convert_madori)
+    for s in ['L', 'D', 'K', 'S']:
+        df[f'fe_count_間取り_{s}'] = df['間取り'].apply(lambda x: x.count(s))
+
+    # 間取りの最初の数字をとってくる
+    df['fe_count_間取り_prefix'] = df['間取り'].apply(lambda x: x[:1])
+    df['fe_count_間取り_prefix'] = df['fe_count_間取り_prefix'].apply(lambda x: x if x.isdigit() else 1)
+    df['fe_count_間取り_prefix'] = df['fe_count_間取り_prefix'].astype(int)
+
+    # 間取りから部屋の数を計算　+Sがあるものは別途算出
+    df['fe_count_room'] = df['fe_count_間取り_prefix'] + 1
+    df['flag'] = df['間取り'].apply(lambda x: 1 if '+' in x else 0)
+    df['fe_count_room'] = df['fe_count_room'] + df['flag']
+    del df['flag']
+    # 特殊な表記
+    for c in ['オープンフロア', 'スタジオ', 'メゾネット']:
+        df[f'fe_is_間取り_{c}'] = df['間取り'].apply(lambda x: 1 if x == c else 0)
+
+    del df['間取り']
+
+    return df

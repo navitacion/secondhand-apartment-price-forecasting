@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 import pickle
-import cudf
 from sklearn.base import BaseEstimator, TransformerMixin
 
 
@@ -9,9 +8,13 @@ class BaseFeatureTransformer(ABC, BaseEstimator, TransformerMixin):
         self.use_cudf = use_cudf
 
     def __call__(self, df):
-        df = cudf.from_pandas(df)
+        if self.use_cudf:
+            import cudf
+            df = cudf.from_pandas(df)
         df = self.transform(df)
-        df = df.to_pandas(df)
+
+        if self.use_cudf:
+            df = df.to_pandas(df)
         return df
 
     def fit(self, X):

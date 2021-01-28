@@ -13,7 +13,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import mean_squared_log_error, mean_absolute_error
 
 from utils.utils import unpickle, to_pickle, seed_everything
-from utils.preprocess import convert_wareki_to_seireki, normalize_area, normalize_moyori, convert_madori
+from utils.preprocess import convert_wareki_to_seireki, normalize_area, normalize_moyori, preprocess_madori
 from utils.data import load_data
 from features import CategoryEncoder, FrequencyEncoder, GroupbyTransformer, TextVectorizer, PivotCountEncoder
 
@@ -63,6 +63,23 @@ def preprocessing(df, cfg):
     df['quarter'] = df['取引時点'].apply(lambda x: x[6:7]).astype(int)
     del df['取引時点']
 
+
+    # TODO 2021年時点からの経過時間
+    for c in ['建築年', 'year']:
+        df[f'fe_diff_{c}_from_2021'] = 2021 - df[c]
+
+    # TODO 建築年と取引時点の経過年数
+    df['fe_diff_取引時点_建築年'] = np.abs(df['year'] - df['建築年'])
+    # quarterの情報も付ける
+    rep = {1: 0, 2: 0.25, 3: 0.5, 4: 0.75}
+    df['quarter_rep'] = df['quarter'].map(rep)
+    df['fe_diff_取引時点_建築年'] += df['quarter_rep']
+    del df['quarter_rep']
+
+    # TODO 建築年が取引時点より新しいかどうか
+    df['fe_is_minus_取引時点_建築年'] = df['year'] - df['建築年']
+    df['fe_is_minus_取引時点_建築年'] = df['fe_is_minus_取引時点_建築年'].apply(lambda x: 1 if x < 0 else 0)
+
     # TODO 用途, 建物の構造をOnehot
     for col in ['用途', '建物の構造']:
         tmp = df[col].str.get_dummies(sep='、')
@@ -71,25 +88,7 @@ def preprocessing(df, cfg):
         del tmp, df[col]
 
     # TODO 間取り
-    df['間取り'] = df['間取り'].apply(convert_madori)
-    for s in ['L', 'D', 'K', 'S']:
-        df[f'fe_count_間取り_{s}'] = df['間取り'].apply(lambda x: x.count(s))
-
-    # 間取りの最初の数字をとってくる
-    df['fe_count_間取り_prefix'] = df['間取り'].apply(lambda x: x[:1])
-    df['fe_count_間取り_prefix'] = df['fe_count_間取り_prefix'].apply(lambda x: x if x.isdigit() else 1)
-    df['fe_count_間取り_prefix'] = df['fe_count_間取り_prefix'].astype(int)
-
-    # 間取りから部屋の数を計算　+Sがあるものは別途算出
-    df['fe_count_room'] = df['fe_count_間取り_prefix'] + 1
-    df['flag'] = df['間取り'].apply(lambda x: 1 if '+' in x else 0)
-    df['fe_count_room'] = df['fe_count_room'] + df['flag']
-    del df['flag']
-    # 特殊な表記
-    for c in ['オープンフロア', 'スタジオ', 'メゾネット']:
-        df[f'fe_is_間取り_{c}'] = df['間取り'].apply(lambda x: 1 if x == c else 0)
-
-    del df['間取り']
+    df = preprocess_madori(df)
 
     # TODO 1部屋あたりの面積
     df['fe_area_per_room'] = df['面積（㎡）'] / df['fe_count_room']
@@ -103,33 +102,44 @@ def preprocessing(df, cfg):
 
 
     # 地域
+    df['fe_concat_都道府県_市区町村'] = df['都道府県名'] + df['市区町村名']
     df['fe_concat_都道府県_市区町村_地区'] = df['都道府県名'] + df['市区町村名'] + df['地区名']
     df['fe_concat_都道府県_市区町村_地区_最寄'] = df['都道府県名'] + df['市区町村名'] + df['地区名'] + df['最寄駅：名称'].apply(lambda x: x.split('(')[0])
 
     # TODO ソフト名をテキストマイニング
-    print('text')
-    text_vectorizer = TextVectorizer(target_col='fe_concat_都道府県_市区町村_地区',
-                                     vectorizer='tfidf',
-                                     transformer='svd',
-                                     ngram_range=(1, 1),
-                                     n_components=cfg.data.vec_n_components)
-    df = text_vectorizer.transform(df)
-
-    text_vectorizer = TextVectorizer(target_col='fe_concat_都道府県_市区町村_地区_最寄',
-                                     vectorizer='tfidf',
-                                     transformer='svd',
-                                     ngram_range=(1, 1),
-                                     n_components=cfg.data.vec_n_components)
-    df = text_vectorizer.transform(df)
+    # print('text')
+    # text_vectorizer = TextVectorizer(target_col='fe_concat_都道府県_市区町村_地区',
+    #                                  vectorizer='tfidf',
+    #                                  transformer='svd',
+    #                                  ngram_range=(1, 3),
+    #                                  n_components=cfg.data.vec_n_components)
+    # df = text_vectorizer.transform(df)
+    #
+    # text_vectorizer = TextVectorizer(target_col='fe_concat_都道府県_市区町村_地区_最寄',
+    #                                  vectorizer='tfidf',
+    #                                  transformer='svd',
+    #                                  ngram_range=(1, 3),
+    #                                  n_components=cfg.data.vec_n_components)
+    # df = text_vectorizer.transform(df)
 
     # TODO Groupbyでいろいろ集約
-    print('groupby')
     group_cols = ['都道府県名', '市区町村名', '地区名', '最寄駅：名称', '建築年', 'year', 'quarter',
-                  'fe_concat_都道府県_市区町村_地区', 'fe_concat_都道府県_市区町村_地区_最寄']
-    value_cols = ['建ぺい率（％）', '容積率（％）', '面積（㎡）', '最寄駅：距離（分）', 'fe_count_room']
+                  'fe_concat_都道府県_市区町村', 'fe_concat_都道府県_市区町村_地区', 'fe_concat_都道府県_市区町村_地区_最寄']
+    value_cols = ['建ぺい率（％）', '容積率（％）', '面積（㎡）', '最寄駅：距離（分）', 'fe_count_room', 'fe_diff_取引時点_建築年']
+    value_cols += [c for c in df.columns if c.startswith('fe_mul_')]
+    value_cols += [c for c in df.columns if c.startswith('fe_div_')]
+    value_cols += [c for c in df.columns if c.startswith('fe_diff_')]
     aggs = ['mean', 'sum', 'std', 'max', 'min', 'nunique']
 
-    transformer = GroupbyTransformer(group_cols, value_cols, aggs, conbination=1, use_cudf=True)
+    print(f'groupby 1')
+    transformer = GroupbyTransformer(group_cols, value_cols, aggs, conbination=1, use_cudf=False)
+    df = transformer.transform(df)
+
+
+    # TODO Frequency Encoding
+    print('freq_enc')
+    cols = ['最寄駅：名称', '建築年', 'fe_concat_都道府県_市区町村']
+    transformer = FrequencyEncoder(cols)
     df = transformer.transform(df)
 
 
@@ -159,7 +169,8 @@ def main(cfg: DictConfig):
 
     experiment = Experiment(api_key=cfg.exp.api_key,
                             project_name=cfg.exp.project_name,
-                            auto_output_logging='simple')
+                            auto_output_logging='simple',
+                            auto_metric_logging=False)
 
     experiment.log_parameters(dict(cfg.data))
 
