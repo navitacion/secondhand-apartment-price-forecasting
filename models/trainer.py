@@ -3,10 +3,11 @@ import numpy as np
 import pandas as pd
 
 class Trainer:
-    def __init__(self, model, id_col, tar_col, features, cv, criterion, experiment):
+    def __init__(self, model, id_col, tar_col, g_col, features, cv, criterion, experiment):
         self.model = model
         self.id_col = id_col
         self.tar_col = tar_col
+        self.g_col = g_col
         self.features = features
         self.cv = cv
         self.criterion = criterion
@@ -33,7 +34,7 @@ class Trainer:
         # Split Train, Test Dataset
         train = df[df['is_train'] == 1].reset_index(drop=True)
         test = df[df['is_train'] == 0].reset_index(drop=True)
-        drop_cols = ['is_train', '取引時点', self.id_col, self.tar_col]
+        drop_cols = ['is_train', self.g_col, self.id_col, self.tar_col]
 
         if self.features is None:
             self.features = [c for c in df.columns if c not in drop_cols]
@@ -46,7 +47,7 @@ class Trainer:
             self.y_train = train[self.tar_col].values
             self.y_train = self._transform_value(self.y_train, mode='forward')
             self.train_id = train[self.id_col].values
-            self.group = train['取引時点']
+            self.group = train[self.g_col]
 
         if mode == 'predict':
             # Test
@@ -84,10 +85,11 @@ class Trainer:
         return out
 
 
-    def _train_cv(self):
+    def _train_cv_group(self):
         """
         Train loop for Cross Validation
         """
+        # init Model list
         self.models = []
         self.oof_pred = np.zeros(len(self.y_train))
         self.oof_y = np.zeros(len(self.y_train))
@@ -101,7 +103,34 @@ class Trainer:
             trn_idx = self.group.isin(tr_groups)
             val_idx = self.group.isin(va_groups)
 
-        # for i, (trn_idx, val_idx) in enumerate(self.cv.split(self.X_train, self.y_train, self.group)):
+            X_trn, y_trn = self.X_train[trn_idx], self.y_train[trn_idx]
+            X_val, y_val = self.X_train[val_idx], self.y_train[val_idx]
+
+            oof = self.model.train(X_trn, y_trn, X_val, y_val, feature_name=self.features)
+
+            # Score
+            oof = self._transform_value(oof, mode='backward')
+            y_val = self._transform_value(y_val, mode='backward')
+            score = self.criterion(y_val, oof)
+
+            # Logging
+            self.experiment.log_metric('Fold_score', score, step=i + 1)
+            print(f'Fold {i + 1}  Score: {score:.3f}')
+            self.oof_pred[val_idx] = oof
+            self.oof_y[val_idx] = y_val
+            self.models.append(self.model)
+
+
+    def _train_cv(self):
+        """
+        Train loop for Cross Validation
+        """
+        # init Model list
+        self.models = []
+        self.oof_pred = np.zeros(len(self.y_train))
+        self.oof_y = np.zeros(len(self.y_train))
+
+        for i, (trn_idx, val_idx) in enumerate(self.cv.split(self.X_train, self.y_train)):
             X_trn, y_trn = self.X_train[trn_idx], self.y_train[trn_idx]
             X_val, y_val = self.X_train[val_idx], self.y_train[val_idx]
 
@@ -179,7 +208,10 @@ class Trainer:
 
     def fit(self, df):
         self._prepare_data(df, mode='fit')
-        self._train_cv()
+        if self.g_col is None:
+            self._train_cv()
+        else:
+            self._train_cv_group()
         self._train_end()
 
 
@@ -195,10 +227,10 @@ class Trainer:
         tar_col =[]
 
         for i, m in enumerate(self.models):
-            # modelからfeature_name, importanceを取得しデータフレームにまとめる
+            # make DataFrame from Model Instance
             tmp_feat = pd.DataFrame({'feature': m.model.feature_name(), f'importance_{i}': m.get_feature_importance()})
             feat_imp_df = feat_imp_df.merge(tmp_feat, on='feature', how='left')
-            # 最後に集計するために各モデルごとのimportance名を記録
+            # add Importance Name
             tar_col.append(f'importance_{i}')
         feat_imp_df.fillna(0, inplace=True)
 

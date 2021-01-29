@@ -159,6 +159,7 @@ def main(cfg: DictConfig):
     del_tar_col = []
     id_col = 'ID'
     tar_col = '取引価格（総額）_log'
+    g_col = '取引時点'
     criterion = MAE
     cv = KFold(n_splits=cfg.data.n_splits, shuffle=True, random_state=cfg.data.seed)
     # cv = GroupKFold(n_splits=5)
@@ -192,7 +193,7 @@ def main(cfg: DictConfig):
         model = CatBoostModel(dict(cfg.cat))
 
     # Train & Predict  ##############################################################################
-    trainer = Trainer(model, id_col, tar_col, features, cv, criterion, experiment)
+    trainer = Trainer(model, id_col, tar_col, g_col, features, cv, criterion, experiment)
     trainer.fit(df)
     trainer.predict(df)
     trainer.get_feature_importance()
