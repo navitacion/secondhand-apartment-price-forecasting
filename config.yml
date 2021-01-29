@@ -14,7 +14,7 @@ data:
   n_splits: 5
   sampling: 0.5
   vec_max_features: 60000
-  vec_n_components: 200
+  vec_n_components: 100
 
 lgb:
   num_iterations: 100000

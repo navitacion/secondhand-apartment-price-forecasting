@@ -58,6 +58,16 @@ def preprocessing(df, cfg):
     # TODO 和暦→西暦
     df['建築年'] = df['建築年'].apply(convert_wareki_to_seireki)
 
+    # TODO 2021年時点からの経過時間
+    for c in ['建築年']:
+        df[f'fe_diff_{c}_from_2021'] = 2021 - df[c]
+
+    # TODO 建ぺい率と容積率と面積
+    cols = ['建ぺい率（％）', '容積率（％）', '面積（㎡）']
+    for c1, c2 in itertools.combinations(cols, 2):
+        df[f'fe_mul_{c1}_{c2}'] = df[c1] * df[c2]
+        df[f'fe_div_{c1}_{c2}'] = df[c1] / df[c2]
+        df[f'fe_div_{c2}_{c1}'] = df[c2] / df[c1]
 
     # TODO 取引時点→`year`, `quarter`
     df['year'] = df['取引時点'].apply(lambda x: x[:4]).astype(int)
@@ -82,11 +92,31 @@ def preprocessing(df, cfg):
     df['fe_concat_都道府県_市区町村_地区_最寄'] = df['都道府県名'] + df['市区町村名'] + df['地区名'] + df['最寄駅：名称'].apply(lambda x: x.split('(')[0])
 
 
+    # TODO ソフト名をテキストマイニング
+    # print('text')
+    # text_vectorizer = TextVectorizer(target_col='fe_concat_都道府県_市区町村_地区',
+    #                                  vectorizer='tfidf',
+    #                                  transformer='svd',
+    #                                  ngram_range=(1, 3),
+    #                                  n_components=cfg.data.vec_n_components)
+    # df = text_vectorizer.transform(df)
+    #
+    # text_vectorizer = TextVectorizer(target_col='fe_concat_都道府県_市区町村_地区_最寄',
+    #                                  vectorizer='tfidf',
+    #                                  transformer='svd',
+    #                                  ngram_range=(1, 3),
+    #                                  n_components=cfg.data.vec_n_components)
+    # df = text_vectorizer.transform(df)
+
+
     # TODO Groupbyでいろいろ集約
     print('groupby')
     group_cols = ['都道府県名', '市区町村名', '地区名', '最寄駅：名称',
                   'fe_concat_都道府県_市区町村', 'fe_concat_都道府県_市区町村_地区', 'fe_concat_都道府県_市区町村_地区_最寄']
-    value_cols = ['建ぺい率（％）', '容積率（％）', '面積（㎡）', 'fe_count_room']
+    value_cols = ['建ぺい率（％）', '容積率（％）', '面積（㎡）', '最寄駅：距離（分）', 'fe_count_room']
+    value_cols += [c for c in df.columns if c.startswith('fe_mul_')]
+    value_cols += [c for c in df.columns if c.startswith('fe_div_')]
+    value_cols += [c for c in df.columns if c.startswith('fe_diff_')]
     aggs = ['mean', 'sum', 'std', 'max', 'min', 'nunique']
 
     for conbi in [1]:
