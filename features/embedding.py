@@ -76,7 +76,10 @@ class PivotCountEncoder(BaseFeatureTransformer):
             else:
                 temp = pd.merge(temp, plat_pivot, on=[self.index_col], how='left')
 
-        temp.fillna(0, inplace=True)
+        # try:
+        #     temp.fillna(0, inplace=True)
+        # except:
+        #     temp = temp.cat.add_categories(0).fillna(0)
 
         transformer = get_transformer(name=self.transformer, n_components=n_components, seed=self.seed)
 

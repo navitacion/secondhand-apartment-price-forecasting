@@ -15,7 +15,8 @@ from sklearn.metrics import mean_squared_log_error, mean_absolute_error
 from utils.utils import unpickle, to_pickle, seed_everything
 from utils.preprocess import convert_wareki_to_seireki, normalize_area, normalize_moyori, preprocess_madori
 from utils.data import load_data
-from features import CategoryEncoder, FrequencyEncoder, GroupbyTransformer, TextVectorizer, PivotCountEncoder
+from features import CategoryEncoder, FrequencyEncoder, GroupbyTransformer, \
+    TextVectorizer, PivotCountEncoder, LagGroupbyTransformer, LagRollingGroupbyTransformer
 
 from models.trainer import Trainer
 from models.model import LGBMModel, CatBoostModel
@@ -47,7 +48,7 @@ def preprocessing(df, cfg):
     for c in ['地区名', '最寄駅：名称']:
         df[c] = df[c].apply(lambda x: mojimoji.zen_to_han(x, kana=False))
     # ()を削除
-    df['最寄駅：名称_1'] = df['最寄駅：名称'].apply(lambda x: x.split('(')[0])
+    df['最寄駅：名称'] = df['最寄駅：名称'].apply(lambda x: x.split('(')[0])
 
     # TODO 面積
     df = normalize_area(df)
@@ -57,6 +58,9 @@ def preprocessing(df, cfg):
 
     # TODO 和暦→西暦
     df['建築年'] = df['建築年'].apply(convert_wareki_to_seireki)
+
+    # 建築年をビニング
+    df['df_cat_建築年'] = pd.cut(df['建築年'], 10, labels=False)
 
     # TODO 2021年時点からの経過時間
     for c in ['建築年']:
@@ -73,12 +77,23 @@ def preprocessing(df, cfg):
     df['year'] = df['取引時点'].apply(lambda x: x[:4]).astype(int)
     df['quarter'] = df['取引時点'].apply(lambda x: x[6:7]).astype(int)
 
+
+    # TODO 取引時と建築年の差分
+    # quarterの情報も付ける
+    rep = {1: 0, 2: 0.25, 3: 0.5, 4: 0.75}
+    df['quarter_rep'] = df['quarter'].map(rep)
+    df['year_rep'] = df['year'] + df['quarter_rep']
+    df['fe_diff_取引時点_建築年'] = df['year_rep'] - df['建築年']
+
+    df.drop(['quarter_rep', 'year_rep'], axis=1, inplace=True)
+
+
     # TODO 用途, 建物の構造をOnehot
     for col in ['用途', '建物の構造']:
         tmp = df[col].str.get_dummies(sep='、')
         tmp.columns = [f'fe_is_{col}_{c}' for c in tmp.columns]
         df = pd.concat([df, tmp], axis=1)
-        del tmp, df[col]
+        del tmp
 
     # TODO 間取り
     df = preprocess_madori(df)
@@ -92,35 +107,35 @@ def preprocessing(df, cfg):
     df['fe_concat_都道府県_市区町村_地区_最寄'] = df['都道府県名'] + df['市区町村名'] + df['地区名'] + df['最寄駅：名称'].apply(lambda x: x.split('(')[0])
 
 
-    # TODO ソフト名をテキストマイニング
-    # print('text')
-    # text_vectorizer = TextVectorizer(target_col='fe_concat_都道府県_市区町村_地区',
-    #                                  vectorizer='tfidf',
-    #                                  transformer='svd',
-    #                                  ngram_range=(1, 3),
-    #                                  n_components=cfg.data.vec_n_components)
-    # df = text_vectorizer.transform(df)
-    #
-    # text_vectorizer = TextVectorizer(target_col='fe_concat_都道府県_市区町村_地区_最寄',
-    #                                  vectorizer='tfidf',
-    #                                  transformer='svd',
-    #                                  ngram_range=(1, 3),
-    #                                  n_components=cfg.data.vec_n_components)
-    # df = text_vectorizer.transform(df)
-
-
     # TODO Groupbyでいろいろ集約
     print('groupby')
     group_cols = ['都道府県名', '市区町村名', '地区名', '最寄駅：名称',
-                  'fe_concat_都道府県_市区町村', 'fe_concat_都道府県_市区町村_地区', 'fe_concat_都道府県_市区町村_地区_最寄']
-    value_cols = ['建ぺい率（％）', '容積率（％）', '面積（㎡）', '最寄駅：距離（分）', 'fe_count_room']
+                  'fe_concat_都道府県_市区町村_地区', 'fe_concat_都道府県_市区町村_地区_最寄']
+    value_cols = ['建ぺい率（％）', '容積率（％）', '面積（㎡）', '最寄駅：距離（分）', 'fe_count_room', 'fe_area_per_room']
     value_cols += [c for c in df.columns if c.startswith('fe_mul_')]
     value_cols += [c for c in df.columns if c.startswith('fe_div_')]
     value_cols += [c for c in df.columns if c.startswith('fe_diff_')]
-    aggs = ['mean', 'sum', 'std', 'max', 'min', 'nunique']
+    aggs = ['mean', 'sum', 'std', 'max', 'min']
 
     for conbi in [1]:
         transformer = GroupbyTransformer(group_cols, value_cols, aggs, conbination=conbi, use_cudf=True)
+        df = transformer.transform(df)
+
+    # TODO PivotEmbedding
+    index_col = '市区町村名'
+    count_cols = ['建築年', '用途', '建物の構造']
+    transformer = PivotCountEncoder(index_col=index_col, count_cols=count_cols, value_col='ID')
+    df = transformer.transform(df)
+
+
+    # TODO
+    aggs = ['mean', 'std']
+    group_cols = ['市区町村名', '地区名', '最寄駅：名称']
+    for g in group_cols:
+        transformer = LagGroupbyTransformer(value_cols=['取引価格（総額）_log'], time_cols=['year'], aggs=aggs, lags=[1, 2], group_col=g)
+        df = transformer.transform(df)
+
+        transformer = LagRollingGroupbyTransformer(value_cols=['取引価格（総額）_log'], time_cols=['year'], aggs=aggs, lags=[1], group_col=g, windows=[2, 3])
         df = transformer.transform(df)
 
 
@@ -135,6 +150,8 @@ def preprocessing(df, cfg):
     cols = list(set(cols))
     cat_enc = CategoryEncoder(cols=cols)
     df = cat_enc.transform(df)
+
+    print(df.isnull().sum())
 
     return df
 
@@ -156,10 +173,10 @@ def main(cfg: DictConfig):
     experiment.log_parameters(dict(cfg.data))
 
     # Config  ####################################################################################
-    del_tar_col = []
+    del_tar_col = ['取引時点']
     id_col = 'ID'
     tar_col = '取引価格（総額）_log'
-    g_col = '取引時点'
+    g_col = 'year'
     criterion = MAE
     cv = KFold(n_splits=cfg.data.n_splits, shuffle=True, random_state=cfg.data.seed)
     # cv = GroupKFold(n_splits=5)

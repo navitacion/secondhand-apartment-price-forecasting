@@ -47,7 +47,8 @@ class Trainer:
             self.y_train = train[self.tar_col].values
             self.y_train = self._transform_value(self.y_train, mode='forward')
             self.train_id = train[self.id_col].values
-            self.group = train[self.g_col]
+            if self.g_col is not None:
+                self.group = train[self.g_col]
 
         if mode == 'predict':
             # Test
